@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shift Table Editable Rows & Columns</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<style>
+  body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #f5f5f5; }
+  .table-header { font-weight: bold; margin-bottom: 10px; font-size: 16px; display: flex; justify-content: center; align-items: center; position: relative; }
+  #table-container { display: inline-block; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  #download-area { padding: 50px; background: #fff; border-radius: 8px; position: relative; }
+
+  table { margin: 10px auto; border-collapse: collapse; table-layout: auto; width: auto; background: #fff; }
+  th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: center; white-space: nowrap; }
+  th { background-color: #4CAF50; color: white; cursor: pointer; }
+  td { background-color: #fff8dc; outline: none; }
+  tr:nth-child(even) td { background: #f2f2f2; }
+  td[contenteditable="true"] { min-width: 50px; cursor: text; }
+  td.selected, th.selected { outline: 2px solid #f00; }
+
+  #date-input, #shift-text { 
+    width: 100%; 
+    background: none; 
+    outline: none; 
+    border: none; 
+    text-align: center; 
+    font-weight: bold; 
+    font-family: "Times New Roman", serif;
+  }
+  #shift-text { font-size: 13px; min-width: 300px; }
+
+  .toolbar { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 5px; margin-top: 15px; }
+  .button-group { display: flex; gap: 6px; align-items: center;}
+
+  button {
+    padding: 7px 12px; font-size: 14px; border-radius: 6px; border: 1px solid transparent;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-weight: 500;
+    transition: all 0.2s ease; background: #f0f0f0; color: #333;
+  }
+  button:hover { background: #e0e0e0; }
+
+  input[type="color"] { padding:0; width:35px; height:35px; border:none; cursor:pointer; }
+  #toggle-formula-btn { position: absolute; top: 10px; right: 10px; font-size:18px; border:none; background:none; cursor:pointer; }
+  .watermark { width: 4rem; position: absolute; left: 0; }
+</style>
+</head>
+<body>
+
+<div id="table-container">
+  <div id="download-area">
+    <button id="toggle-formula-btn"><i class="fa fa-calculator" style="color:green"></i></button>
+    <div id="header" class="table-header">
+      <img src="icon.jpeg" class="watermark" />
+      <div>
+        <input id="date-input" type="text" />
+        <br />
+        <input id="shift-text" type="text" />
+      </div>
+    </div>
+    <div id="container">
+      <table id="shift-table">
+        <thead>
+          <tr>
+            <th contenteditable="true">Item</th>
+            <th contenteditable="true">Get</th>
+            <th contenteditable="true">Lost</th>
+            <th contenteditable="true">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="button-group">
+      <button id="add-row-btn"><i class="fa fa-plus" style="color:#28a745"></i> Add Row</button>
+      <button id="delete-selected-row-btn"><i class="fa fa-trash" style="color:#dc3545"></i> Delete Row</button>
+      <button id="add-col-btn"><i class="fa fa-plus-square" style="color:#28a745"></i> Add Column</button>
+      <button id="delete-selected-col-btn"><i class="fa fa-minus-square" style="color:#dc3545"></i> Delete Column</button>
+    </div>
+    <div class="button-group">
+      <button id="bold-btn"><i class="fa fa-bold"></i> Bold</button>
+      <input type="color" id="color-btn" value="#000000">
+    </div>
+    <div class="button-group">
+      <button id="copy-style-btn"><i class="fa fa-copy" style="color:#007bff"></i> Copy Style</button>
+      <button id="paste-style-btn"><i class="fa fa-paste" style="color:#007bff"></i> Copy Format</button>
+    </div>
+    <div class="button-group">
+      <button id="undo-btn"><i class="fa fa-undo" style="color:#fd7e14"></i> Undo</button>
+      <button id="redo-btn"><i class="fa fa-redo" style="color:#fd7e14"></i> Redo</button>
+    </div>
+    <div class="button-group">
+      <button id="download-btn"><i class="fa fa-download" style="color:#6f42c1"></i> Download PNG</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script>
+const table = document.getElementById("shift-table");
+const tableBody = table.querySelector("tbody") || table;
+let selectedCell = null;
+let copiedStyles = null;
+let formulaEnabled = true;
+let undoStack = [];
+let redoStack = [];
+
+function saveState() {
+  const html = document.getElementById("download-area").innerHTML;
+  undoStack.push(html);
+  if (undoStack.length > 50) undoStack.shift();
+  redoStack = [];
+}
+
+// Formula Logic (Total - Lost = Get)
+function calculateRow(row) {
+  if (!formulaEnabled) return;
+  const lostVal = parseFloat(row.cells[2]?.innerText.replace(/,/g, '')) || 0;
+  const totalVal = parseFloat(row.cells[3]?.innerText.replace(/,/g, '')) || 0;
+  
+  if (row.cells[2].innerText.trim() === "" && row.cells[3].innerText.trim() === "") {
+    row.cells[1].innerText = "";
+  } else {
+    row.cells[1].innerText = totalVal - lostVal;
+  }
+}
+
+function rebindTableEvents() {
+  table.querySelectorAll("td,th").forEach(cell => {
+    // Click Select
+    cell.onclick = (e) => {
+      document.querySelectorAll("td.selected,th.selected").forEach(c => c.classList.remove("selected"));
+      selectedCell = e.target;
+      selectedCell.classList.add("selected");
+    };
+    // Input for formula
+    cell.oninput = () => {
+      calculateRow(cell.parentNode);
+      saveState();
+    };
+  });
+}
+
+function addEmptyRow() {
+  const newRow = table.insertRow();
+  const colCount = table.rows[0].cells.length;
+  for (let i = 0; i < colCount; i++) {
+    const cell = newRow.insertCell();
+    cell.contentEditable = "true";
+  }
+  rebindTableEvents();
+}
+
+// Toolbar Functions
+document.getElementById("add-row-btn").onclick = () => { addEmptyRow(); saveState(); };
+
+document.getElementById("delete-selected-row-btn").onclick = () => {
+  if(selectedCell && selectedCell.tagName === "TD") {
+    table.deleteRow(selectedCell.parentNode.rowIndex);
+    selectedCell = null;
+    saveState();
+  }
+};
+
+document.getElementById("add-col-btn").onclick = () => {
+  for (let r = 0; r < table.rows.length; r++) {
+    const cell = (r === 0) ? document.createElement("th") : table.rows[r].insertCell();
+    if (r === 0) { cell.textContent = "New"; table.rows[r].appendChild(cell); }
+    cell.contentEditable = "true";
+  }
+  rebindTableEvents();
+  saveState();
+};
+
+document.getElementById("delete-selected-col-btn").onclick = () => {
+  if (selectedCell) {
+    const idx = selectedCell.cellIndex;
+    for (let r = 0; r < table.rows.length; r++) table.rows[r].deleteCell(idx);
+    selectedCell = null;
+    saveState();
+  }
+};
+
+document.getElementById("bold-btn").onclick = () => {
+  if (selectedCell) {
+    selectedCell.style.fontWeight = (selectedCell.style.fontWeight === "bold") ? "normal" : "bold";
+    saveState();
+  }
+};
+
+document.getElementById("color-btn").oninput = (e) => {
+  if (selectedCell) { selectedCell.style.color = e.target.value; saveState(); }
+};
+
+document.getElementById("copy-style-btn").onclick = () => {
+  if (selectedCell) {
+    const row = selectedCell.parentNode;
+    if(row.cells.length >= 2){
+      // မူလစာသားပြောင်းလဲမှု logic
+      if(table.rows[1]) table.rows[1].cells[0].innerText = "MB Qt (Nor)";
+      if(table.rows[2]) table.rows[2].cells[0].innerText = "MB Qt (Pro)";
+    }
+    const cs = getComputedStyle(selectedCell);
+    copiedStyles = { color: cs.color, fontWeight: cs.fontWeight, backgroundColor: cs.backgroundColor };
+  }
+};
+
+document.getElementById("paste-style-btn").onclick = () => {
+  if (selectedCell && copiedStyles) {
+    selectedCell.style.color = copiedStyles.color;
+    selectedCell.style.fontWeight = copiedStyles.fontWeight;
+    selectedCell.style.backgroundColor = copiedStyles.backgroundColor;
+    saveState();
+  }
+};
+
+document.getElementById("undo-btn").onclick = () => {
+  if (undoStack.length > 1) {
+    redoStack.push(undoStack.pop());
+    document.getElementById("download-area").innerHTML = undoStack[undoStack.length - 1];
+    rebindTableEvents();
+  }
+};
+
+document.getElementById("redo-btn").onclick = () => {
+  if (redoStack.length > 0) {
+    const state = redoStack.pop();
+    undoStack.push(state);
+    document.getElementById("download-area").innerHTML = state;
+    rebindTableEvents();
+  }
+};
+
+document.getElementById("toggle-formula-btn").onclick = function() {
+  formulaEnabled = !formulaEnabled;
+  this.innerHTML = formulaEnabled ? '<i class="fa fa-calculator" style="color:green"></i>' : '<i class="fa fa-ban" style="color:red"></i>';
+};
+
+document.getElementById("download-btn").onclick = () => {
+  const btn = document.getElementById("toggle-formula-btn");
+  btn.style.visibility = "hidden";
+  html2canvas(document.getElementById("download-area")).then(canvas => {
+    const link = document.createElement("a");
+    link.download = "shift_table.png";
+    link.href = canvas.toDataURL();
+    link.click();
+    btn.style.visibility = "visible";
+  });
+};
+
+// Start Setup
+for (let i = 0; i < 4; i++) addEmptyRow();
+const today = new Date();
+document.getElementById("date-input").value = `${String(today.getDate()).padStart(2, '0')}.${String(today.getMonth() + 1).padStart(2, '0')}.${today.getFullYear()}`;
+document.getElementById("shift-text").value = (today.getHours() >= 6 && today.getHours() < 19) ? "Morning Shift" : "Morning & Night Shift";
+saveState();
+</script>
+</body>
+</html>
